@@ -22,6 +22,7 @@ func _init() -> void:
 	test_serialization_round_trip()
 	test_flags()
 	test_scripts_compile()
+	test_autoload_node()
 	print("lucida godot tests: %d failure(s)" % failures)
 	quit(1 if failures > 0 else 0)
 
@@ -117,3 +118,39 @@ func test_scripts_compile() -> void:
 	for path in ["res://addons/lucida/lucida.gd", "res://addons/lucida/plugin.gd"]:
 		var s: GDScript = load(path)
 		check(s != null and s.can_instantiate(), "%s compiles" % path)
+
+
+## The autoload: consent before any disk write, flags served and reported once, state file removed on opt out.
+func test_autoload_node() -> void:
+	var state := "user://lucida_state.json"
+	if FileAccess.file_exists(state):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(state))
+	var n = load("res://addons/lucida/lucida.gd").new()
+	root.add_child(n)
+	n.setup("lc_pk_test", {"api_host": "http://127.0.0.1:9", "consent": "opt_in", "preload_flags": false})
+	check(n.is_opted_out(), "opt_in mode starts opted out")
+	check(not FileAccess.file_exists(state), "no state file before consent")
+	n.opt_in()
+	check(not n.is_opted_out() and FileAccess.file_exists(state), "state persisted after consent")
+	var flags := '{"flags":{"a":{"enabled":true},"b":{"variant":"blue","payload":{"x":1}}}}'
+	n._on_flags_done(HTTPRequest.RESULT_SUCCESS, 200, PackedStringArray(), flags.to_utf8_buffer())
+	check(n.is_feature_enabled("a") and n.get_flag("b") == "blue" and n.get_flag_payload("b")["x"] == 1, "flags served")
+	n.get_flag("a")
+	var called: Array = n.core.queue.filter(func(e): return e["event"] == "$feature_flag_called")
+	check(called.size() == 2, "$feature_flag_called once per flag value")
+	n._on_flags_done(HTTPRequest.RESULT_SUCCESS, 500, PackedStringArray(), "oops".to_utf8_buffer())
+	check(n.get_flag("a") == true, "a failed reload keeps the cached flags")
+	n.capture("buy", {"$lc_org": "spoof"})
+	var e: Dictionary = n.core.queue[-1]
+	check(e["properties"]["$feature/a"] == true and not e["properties"].has("$lc_org"), "flags attached, reserved props stripped")
+	n.register({"tier": "gold", "$lc_project": "x"})
+	check(n.core.super_props.get("tier") == "gold" and not n.core.super_props.has("$lc_project"), "register strips reserved props")
+	n.screen("Shop")
+	var s: Dictionary = n.core.queue[-1]
+	check(s["event"] == "$screen" and s["properties"]["$screen_name"] == "Shop", "screen event")
+	n.opt_out()
+	check(n.is_opted_out() and not FileAccess.file_exists(state), "opt out deletes the state file")
+	var before: int = n.core.queue.size()
+	n.capture("after")
+	check(n.core.queue.size() == before, "nothing captured after opt out")
+	n.free()
