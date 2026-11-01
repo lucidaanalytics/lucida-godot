@@ -1,0 +1,10 @@
+; Minimal project so the addon's tests run headless (godot --headless -s tests/test_lucida.gd).
+config_version=5
+
+[application]
+
+config/name="lucida-godot"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/lucida/plugin.cfg")

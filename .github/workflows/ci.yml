@@ -1,0 +1,23 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+env:
+  GODOT_VERSION: 4.7.2-stable
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Godot (checksum verified)
+        run: |
+          base="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}"
+          f="Godot_v${GODOT_VERSION}_linux.x86_64"
+          curl -fsSLO "$base/$f.zip" -O "$base/SHA512-SUMS.txt"
+          grep " $f.zip\$" SHA512-SUMS.txt | sha512sum -c -
+          unzip -q "$f.zip" && sudo install "$f" /usr/local/bin/godot
+      - run: godot --headless --import || true # registers the .gd class and uid files before the script runs
+      - run: godot --headless -s tests/test_lucida.gd
